@@ -1,0 +1,13 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.12"
+dependencies = [
+    "bibtexparser>=1.4.3",
+    "fastapi>=0.128.0",
+    "python-multipart>=0.0.21",
+    "python-toon>=0.1.3",
+    "rapidfuzz>=3.0.0",
+    "uvicorn[standard]>=0.40.0",
+]

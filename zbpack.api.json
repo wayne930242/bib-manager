@@ -1,0 +1,5 @@
+{
+  "app_dir": "apps/api",
+  "build_command": "pip install uv && uv sync",
+  "start_command": "uv run uvicorn main:app --host 0.0.0.0 --port 8000"
+}

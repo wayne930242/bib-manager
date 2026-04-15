@@ -1,0 +1,5 @@
+{
+  "app_dir": "apps/web",
+  "build_command": "pnpm install && pnpm build",
+  "start_command": "pnpm start"
+}
