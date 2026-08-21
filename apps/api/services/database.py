@@ -1,24 +1,40 @@
 """
-BibTeX parsing and search service.
-Reads directly from bibliography.bib without database.
+BibTeX-backed storage service.
+
+bibliography.bib remains the single source of truth for entry data (it is
+git-versioned and edited by other tooling — Typst, Zotero conversion,
+fix-bib). SQLite (bib.db) is a derived, gitignored index over it: it exists
+so reads (list/search/get/stats) don't have to reparse the .bib file with
+bibtexparser on every request, and so the index survives process restarts.
+Notes are user-authored data with no .bib equivalent, so they stay in the
+git-tracked notes.toon side file, unchanged from before.
 """
 
+import sqlite3
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 import toon
 import bibtexparser
 from bibtexparser.bparser import BibTexParser
 from bibtexparser.customization import convert_to_unicode
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
 LITERATURE_ROOT = PROJECT_ROOT.parent / "literature"
 BIB_PATH = LITERATURE_ROOT / "references" / "bibliography.bib"
 NOTES_PATH = PROJECT_ROOT / "bib-manager" / "data" / "notes.toon"
+DB_PATH = PROJECT_ROOT / "bib-manager" / "data" / "bib.db"
 
-# In-memory cache
-_entries_cache: list[dict] = []
+# FastAPI runs sync endpoints in a thread pool; update_notes()'s
+# load-mutate-save cycle over notes.toon must be serialized or two
+# concurrent PATCH /notes calls can race and one write silently wins
+# over the other.
+_notes_lock = threading.Lock()
+
 _notes_cache: dict[str, str] = {}
 
 
@@ -28,87 +44,161 @@ def _load_notes() -> dict[str, str]:
     if NOTES_PATH.exists():
         with open(NOTES_PATH, encoding="utf-8") as f:
             content = f.read().strip()
-            if content:
-                _notes_cache = toon.decode(content)
-            else:
-                _notes_cache = {}
+            _notes_cache = toon.decode(content) if content else {}
     return _notes_cache
 
 
-def _save_notes():
+def _save_notes() -> None:
     """Save notes to TOON file."""
     NOTES_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(NOTES_PATH, "w", encoding="utf-8") as f:
         f.write(toon.encode(_notes_cache))
 
 
-def parse_bibtex(bib_path: Path = BIB_PATH) -> list[dict]:
-    """Parse BibTeX file and return entries."""
-    global _entries_cache
+@contextmanager
+def _connect() -> Iterator[sqlite3.Connection]:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
+
+def _row_to_entry(row: sqlite3.Row) -> dict:
+    return {
+        "key": row["key"],
+        "entry_type": row["entry_type"],
+        "title": row["title"],
+        "author": row["author"],
+        "year": row["year"],
+        "journal": row["journal"],
+        "publisher": row["publisher"],
+        "content": row["content"],
+        "notes": _notes_cache.get(row["key"], ""),
+    }
+
+
+def init_db() -> None:
+    """Create the SQLite schema (if needed) and load current data into it."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                entry_type TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                author TEXT NOT NULL DEFAULT '',
+                year TEXT NOT NULL DEFAULT '',
+                journal TEXT NOT NULL DEFAULT '',
+                publisher TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL,
+                sort_order INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_key ON entries(key)")
+    _load_notes()
+    sync_from_bibtex()
+
+
+def sync_from_bibtex(bib_path: Path = BIB_PATH) -> int:
+    """Rebuild the entries table from the BibTeX file.
+
+    This is a full delete+reinsert on every sync, not an incremental upsert
+    keyed by citation key. bibliography.bib can transiently contain duplicate
+    keys (that's exactly what get_stats()'s duplicate detection surfaces, and
+    what fix-bib cleans up), so `key` can't be used as a uniqueness constraint
+    to upsert against without silently collapsing duplicates. A full rebuild
+    keeps duplicate rows intact for that detection and needs no key-matching
+    logic. Notes live in notes.toon, not in this table, so a rebuild never
+    touches them: an entry removed from bibliography.bib simply drops out of
+    this index (rather than lingering as a "stale" row) and its note stays in
+    notes.toon, reattaching automatically if the key ever reappears — nothing
+    is actually lost, since bibliography.bib is itself git-versioned.
+    """
     if not bib_path.exists():
-        return []
+        with _connect() as conn:
+            conn.execute("DELETE FROM entries")
+        return 0
 
     with open(bib_path, encoding="utf-8") as f:
         parser = BibTexParser(common_strings=True)
         parser.customization = convert_to_unicode
         bib_db = bibtexparser.load(f, parser=parser)
 
-    _load_notes()
-
-    entries = []
-    for entry in bib_db.entries:
-        # Reconstruct BibTeX content
+    rows = []
+    for i, entry in enumerate(bib_db.entries):
         content_lines = [f"@{entry.get('ENTRYTYPE', 'misc')}{{{entry.get('ID', '')},"]
-        for key, value in entry.items():
-            if key not in ('ENTRYTYPE', 'ID'):
-                content_lines.append(f"  {key} = {{{value}}},")
+        for field, value in entry.items():
+            if field not in ("ENTRYTYPE", "ID"):
+                content_lines.append(f"  {field} = {{{value}}},")
         content_lines.append("}")
         content = "\n".join(content_lines)
 
-        key = entry.get("ID", "")
-        entries.append({
-            "key": key,
-            "entry_type": entry.get("ENTRYTYPE", "misc"),
-            "title": entry.get("title", ""),
-            "author": entry.get("author", ""),
-            "year": entry.get("year", ""),
-            "journal": entry.get("journal", ""),
-            "publisher": entry.get("publisher", ""),
-            "content": content,
-            "notes": _notes_cache.get(key, ""),
-        })
+        rows.append((
+            entry.get("ID", ""),
+            entry.get("ENTRYTYPE", "misc"),
+            entry.get("title", ""),
+            entry.get("author", ""),
+            entry.get("year", ""),
+            entry.get("journal", ""),
+            entry.get("publisher", ""),
+            content,
+            i,
+        ))
 
-    _entries_cache = entries
-    return entries
+    with _connect() as conn:
+        conn.execute("DELETE FROM entries")
+        conn.executemany(
+            """
+            INSERT INTO entries
+                (key, entry_type, title, author, year, journal, publisher, content, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+    return len(rows)
 
 
 def get_entries(page: int = 1, per_page: int = 50) -> tuple[list[dict], int]:
-    """Get paginated entries."""
-    if not _entries_cache:
-        parse_bibtex()
-
+    """Get paginated entries, in bibliography.bib file order."""
     offset = (page - 1) * per_page
-    return _entries_cache[offset:offset + per_page], len(_entries_cache)
+    with _connect() as conn:
+        total = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM entries ORDER BY sort_order LIMIT ? OFFSET ?",
+            (per_page, offset),
+        ).fetchall()
+    return [_row_to_entry(r) for r in rows], total
 
 
 def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dict]:
-    """Fuzzy search in entries using rapidfuzz.
+    """Fuzzy search entries using rapidfuzz.
+
+    SQLite has no built-in fuzzy matching, so this loads all rows and scores
+    them in Python — the same approach as the previous in-memory version,
+    just sourced from SQLite instead of a module-level list.
 
     Args:
         query: Search query
         limit: Maximum number of results
         threshold: Minimum fuzzy match score (0-100)
     """
-    if not _entries_cache:
-        parse_bibtex()
+    with _connect() as conn:
+        rows = conn.execute("SELECT * FROM entries ORDER BY sort_order").fetchall()
+    entries = [_row_to_entry(r) for r in rows]
 
     query_lower = query.lower().strip()
     if not query_lower:
-        return _entries_cache[:limit]
+        return entries[:limit]
 
     scored_entries = []
-    for entry in _entries_cache:
+    for entry in entries:
         # Check individual fields for better fuzzy matching
         fields = [
             entry.get("key", "").lower(),
@@ -150,53 +240,53 @@ def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dic
 
 
 def get_entry(key: str) -> Optional[dict]:
-    """Get single entry by key."""
-    if not _entries_cache:
-        parse_bibtex()
-
-    for entry in _entries_cache:
-        if entry["key"] == key:
-            return entry
-    return None
+    """Get single entry by key (first occurrence in file order, if duplicated)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM entries WHERE key = ? ORDER BY sort_order LIMIT 1",
+            (key,),
+        ).fetchone()
+    return _row_to_entry(row) if row else None
 
 
 def update_notes(key: str, notes: str) -> bool:
-    """Update notes for an entry."""
-    _load_notes()
-    _notes_cache[key] = notes
-    _save_notes()
+    """Update notes for an entry. Notes are stored in notes.toon, not SQLite."""
+    with _connect() as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM entries WHERE key = ? LIMIT 1", (key,)
+        ).fetchone()
+    if not exists:
+        return False
 
-    # Update cache
-    for entry in _entries_cache:
-        if entry["key"] == key:
-            entry["notes"] = notes
-            return True
-    return False
+    with _notes_lock:
+        _load_notes()
+        _notes_cache[key] = notes
+        _save_notes()
+    return True
 
 
 def get_stats() -> dict:
     """Get statistics including duplicate detection."""
-    if not _entries_cache:
-        parse_bibtex()
+    _load_notes()
+    with _connect() as conn:
+        rows = conn.execute("SELECT key, entry_type FROM entries").fetchall()
 
     types: dict[str, int] = {}
     with_notes = 0
     key_counts: dict[str, int] = {}
 
-    for entry in _entries_cache:
-        t = entry.get("entry_type", "misc")
+    for row in rows:
+        t = row["entry_type"]
         types[t] = types.get(t, 0) + 1
-        if entry.get("notes"):
+        if _notes_cache.get(row["key"]):
             with_notes += 1
-        # Count duplicate keys
-        key = entry.get("key", "")
-        key_counts[key] = key_counts.get(key, 0) + 1
+        key_counts[row["key"]] = key_counts.get(row["key"], 0) + 1
 
     # Find duplicates (keys appearing more than once)
     duplicates = {k: v for k, v in key_counts.items() if v > 1}
 
     return {
-        "total_entries": len(_entries_cache),
+        "total_entries": len(rows),
         "entries_with_notes": with_notes,
         "entry_types": types,
         "duplicate_keys": duplicates,
@@ -204,21 +294,7 @@ def get_stats() -> dict:
     }
 
 
-def reload():
-    """Force reload from bib file."""
-    global _entries_cache, _notes_cache
-    _entries_cache = []
-    _notes_cache = {}
-    parse_bibtex()
-
-
-# Initialize on import
-def init_db():
-    """Initialize by loading entries."""
-    parse_bibtex()
-
-
-def sync_from_bibtex(bib_path: Path = BIB_PATH) -> int:
-    """Reload entries from BibTeX file."""
-    reload()
-    return len(_entries_cache)
+def reload() -> None:
+    """Force reload from bib file and notes into SQLite."""
+    _load_notes()
+    sync_from_bibtex()
