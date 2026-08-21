@@ -13,7 +13,8 @@ from rapidfuzz import fuzz, process
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
-BIB_PATH = PROJECT_ROOT / "references" / "bibliography.bib"
+LITERATURE_ROOT = PROJECT_ROOT.parent / "literature"
+BIB_PATH = LITERATURE_ROOT / "references" / "bibliography.bib"
 NOTES_PATH = PROJECT_ROOT / "bib-manager" / "data" / "notes.toon"
 
 # In-memory cache

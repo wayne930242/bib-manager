@@ -6,8 +6,10 @@ from services import database as db
 
 router = APIRouter(prefix="/cli", tags=["cli"])
 
-# Project root (phd-essay)
+# Project root (phd-essay) and the sibling literature repo that now holds
+# references/, scripts/convert_zotero.py, and scripts/fix_bib.py
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
+LITERATURE_ROOT = PROJECT_ROOT.parent / "literature"
 
 
 @router.post("/sync")
@@ -21,12 +23,12 @@ def sync_bibliography():
     results = {"steps": []}
 
     # Step 1: Convert Zotero (if JSON exists)
-    zotero_json = PROJECT_ROOT / "references" / "Exported Items.json"
+    zotero_json = LITERATURE_ROOT / "references" / "Exported Items.json"
     if zotero_json.exists():
         try:
             result = subprocess.run(
                 ["uv", "run", "convert-zotero"],
-                cwd=PROJECT_ROOT,
+                cwd=LITERATURE_ROOT,
                 capture_output=True,
                 text=True,
                 timeout=60
@@ -54,7 +56,7 @@ def sync_bibliography():
     try:
         result = subprocess.run(
             ["uv", "run", "fix-bib"],
-            cwd=PROJECT_ROOT,
+            cwd=LITERATURE_ROOT,
             capture_output=True,
             text=True,
             timeout=60
@@ -99,7 +101,7 @@ def fix_bibliography():
     try:
         result = subprocess.run(
             ["uv", "run", "fix-bib"],
-            cwd=PROJECT_ROOT,
+            cwd=LITERATURE_ROOT,
             capture_output=True,
             text=True,
             timeout=60
