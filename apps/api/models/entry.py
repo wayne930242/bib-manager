@@ -4,6 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class RelatedBlogPost(BaseModel):
+    slug: str
+    title: str
+    url: str
+    published_at: Optional[datetime] = None
+    relation_type: str
+
+
 class EntryBase(BaseModel):
     key: str
     entry_type: str
@@ -18,6 +26,7 @@ class EntryBase(BaseModel):
 
 class Entry(EntryBase):
     notes: Optional[str] = None
+    blog_posts: list[RelatedBlogPost] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -47,6 +56,19 @@ class EntryUpsert(BaseModel):
 
 class EntryBatchUpsert(BaseModel):
     entries: list[EntryUpsert]
+
+
+class BlogPostUpsert(BaseModel):
+    slug: str
+    title: str
+    url: str
+    source_path: str
+    published_at: Optional[datetime] = None
+    bib_keys: list[str] = Field(min_length=1)
+
+
+class BlogPostSync(BaseModel):
+    posts: list[BlogPostUpsert]
 
 
 class BibExportRequest(BaseModel):

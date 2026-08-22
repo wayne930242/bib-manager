@@ -257,6 +257,45 @@ def _row_to_entry(row: RowMapping) -> dict[str, Any]:
     }
 
 
+def _attach_blog_posts(
+    connection: Connection, entries: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach bibliography-linked public blog posts to entry dictionaries."""
+    if not entries:
+        return entries
+    by_key = {entry["key"]: entry for entry in entries}
+    for entry in entries:
+        entry["blog_posts"] = []
+
+    blog_rows = connection.execute(
+        select(
+            entry_blog_posts_table.c.entry_key,
+            entry_blog_posts_table.c.relation_type,
+            blog_posts_table.c.slug,
+            blog_posts_table.c.title,
+            blog_posts_table.c.url,
+            blog_posts_table.c.published_at,
+        )
+        .join(
+            blog_posts_table,
+            entry_blog_posts_table.c.blog_slug == blog_posts_table.c.slug,
+        )
+        .where(entry_blog_posts_table.c.entry_key.in_(by_key))
+        .order_by(blog_posts_table.c.published_at.desc())
+    ).mappings()
+    for row in blog_rows:
+        by_key[row["entry_key"]]["blog_posts"].append(
+            {
+                "slug": row["slug"],
+                "title": row["title"],
+                "url": row["url"],
+                "published_at": row["published_at"],
+                "relation_type": row["relation_type"],
+            }
+        )
+    return entries
+
+
 def _next_sort_order(connection: Connection) -> int:
     value = connection.execute(select(func.max(entries_table.c.sort_order))).scalar()
     return 0 if value is None else value + 1
@@ -367,6 +406,59 @@ def upsert_entries(entries: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]
         return [_upsert_with_connection(connection, entry) for entry in entries]
 
 
+def _require_entry_keys(connection: Connection, keys: set[str]) -> None:
+    if not keys:
+        return
+    existing = set(
+        connection.execute(
+            select(entries_table.c.key).where(entries_table.c.key.in_(keys))
+        ).scalars()
+    )
+    missing = sorted(keys - existing)
+    if missing:
+        raise KeyError(f"Unknown citation keys: {', '.join(missing)}")
+
+
+def sync_blog_posts(posts: Iterable[Mapping[str, Any]]) -> tuple[int, int]:
+    """Replace bibliography-linked public blog metadata in one transaction."""
+    items = [dict(post) for post in posts]
+    slugs = [str(item["slug"]) for item in items]
+    if len(set(slugs)) != len(slugs):
+        raise ValueError("Blog post payload contains duplicate slugs")
+    keys = {
+        str(key)
+        for item in items
+        for key in item.get("bib_keys", [])
+    }
+    now = datetime.now(UTC)
+    relations = 0
+    with engine.begin() as connection:
+        _require_entry_keys(connection, keys)
+        connection.execute(delete(blog_posts_table))
+        for item, slug in zip(items, slugs):
+            connection.execute(
+                insert(blog_posts_table).values(
+                    slug=slug,
+                    title=str(item["title"]),
+                    url=str(item["url"]),
+                    source_path=str(item["source_path"]),
+                    published_at=item.get("published_at"),
+                    updated_at=now,
+                )
+            )
+            for key in dict.fromkeys(str(key) for key in item["bib_keys"]):
+                connection.execute(
+                    insert(entry_blog_posts_table).values(
+                        entry_key=key,
+                        blog_slug=slug,
+                        relation_type="cited-by",
+                        notes="",
+                    )
+                )
+                relations += 1
+    return len(items), relations
+
+
 def import_bibtex(bib_path: Path = BIB_PATH, *, replace: bool = False) -> int:
     """Explicitly import BibTeX into the DB; normal startup never resyncs it."""
     parsed_entries = _parse_bibtex(bib_path.read_text(encoding="utf-8"))
@@ -434,7 +526,10 @@ def get_entries(page: int = 1, per_page: int = 50) -> tuple[list[dict], int]:
             .limit(per_page)
             .offset(offset)
         ).mappings().all()
-    return [_row_to_entry(row) for row in rows], total
+        entries = _attach_blog_posts(
+            connection, [_row_to_entry(row) for row in rows]
+        )
+    return entries, total
 
 
 def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dict]:
@@ -442,7 +537,9 @@ def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dic
         rows = connection.execute(
             select(entries_table).order_by(entries_table.c.sort_order)
         ).mappings().all()
-    entries = [_row_to_entry(row) for row in rows]
+        entries = _attach_blog_posts(
+            connection, [_row_to_entry(row) for row in rows]
+        )
     query_lower = query.lower().strip()
     if not query_lower:
         return entries[:limit]
@@ -478,7 +575,10 @@ def get_entry(key: str) -> Optional[dict]:
         row = connection.execute(
             select(entries_table).where(entries_table.c.key == key)
         ).mappings().first()
-    return _row_to_entry(row) if row else None
+        entries = _attach_blog_posts(
+            connection, [_row_to_entry(row)] if row else []
+        )
+    return entries[0] if entries else None
 
 
 def update_notes(key: str, notes: str) -> bool:

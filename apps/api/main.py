@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import entries, cli
+from routers import cli, entries, sync
 from services import database as db
 
 
@@ -45,6 +45,7 @@ app.add_middleware(
 # Include routers
 app.include_router(entries.router, prefix="/api")
 app.include_router(cli.router, prefix="/api")
+app.include_router(sync.router, prefix="/api")
 
 
 @app.get("/")

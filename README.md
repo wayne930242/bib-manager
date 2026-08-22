@@ -47,3 +47,9 @@ API operations:
 - `POST /api/entries/export`: render selected keys without writing a file.
 - `POST /api/cli/export`: regenerate the shared `bibliography.bib` from DB.
 - `POST /api/cli/import-legacy`: explicit one-way legacy import.
+- `POST /api/sync/blog-posts`: replace bibliography-linked public posts.
+
+The sync endpoint requires `Authorization: Bearer $BIB_SYNC_TOKEN`. The `blog`
+repository runs its sync workflow after related content reaches `main`; it uses
+a GitHub variable named
+`BIB_MANAGER_API_URL` and a GitHub secret named `BIB_SYNC_TOKEN`.

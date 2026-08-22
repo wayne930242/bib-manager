@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,8 @@ class DatabaseApiTests(unittest.TestCase):
         root = Path(self.temporary_directory.name)
         self.original_database_url = db.DATABASE_URL
         self.original_paths = (db.BIB_PATH, db.LEGACY_NOTES_PATH)
+        self.original_sync_token = os.environ.get("BIB_SYNC_TOKEN")
+        os.environ["BIB_SYNC_TOKEN"] = "test-sync-token"
         db.configure_database(f"sqlite:///{root / 'library.sqlite3'}")
         db.BIB_PATH = root / "bibliography.bib"
         db.LEGACY_NOTES_PATH = root / "notes.toon"
@@ -24,7 +27,67 @@ class DatabaseApiTests(unittest.TestCase):
         self.client_context.__exit__(None, None, None)
         db.BIB_PATH, db.LEGACY_NOTES_PATH = self.original_paths
         db.configure_database(self.original_database_url)
+        if self.original_sync_token is None:
+            os.environ.pop("BIB_SYNC_TOKEN", None)
+        else:
+            os.environ["BIB_SYNC_TOKEN"] = self.original_sync_token
         self.temporary_directory.cleanup()
+
+    def test_publication_sync_attaches_blog_posts(self) -> None:
+        self.client.post(
+            "/api/entries",
+            json={
+                "key": "fine1994",
+                "entry_type": "article",
+                "title": "Essence and Modality",
+            },
+        ).raise_for_status()
+        headers = {"Authorization": "Bearer test-sync-token"}
+        blog_response = self.client.post(
+            "/api/sync/blog-posts",
+            headers=headers,
+            json={
+                "posts": [
+                    {
+                        "slug": "phlosophy/metaphysic/essence-and-modality",
+                        "title": "Kit Fine, Essence and Modality",
+                        "url": "https://wayneh.tw/posts/phlosophy/metaphysic/essence-and-modality",
+                        "source_path": "src/content/posts/phlosophy/metaphysic/essence-and-modality.md",
+                        "published_at": "2026-01-01T00:00:00Z",
+                        "bib_keys": ["fine1994"],
+                    }
+                ]
+            },
+        )
+        self.assertEqual(blog_response.status_code, 200)
+
+        entry = self.client.get("/api/entries/fine1994").json()
+        self.assertEqual(
+            entry["blog_posts"][0]["slug"],
+            "phlosophy/metaphysic/essence-and-modality",
+        )
+
+    def test_publication_sync_requires_token_and_known_keys(self) -> None:
+        unauthorized = self.client.post(
+            "/api/sync/blog-posts", json={"posts": []}
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+        unknown = self.client.post(
+            "/api/sync/blog-posts",
+            headers={"Authorization": "Bearer test-sync-token"},
+            json={
+                "posts": [
+                    {
+                        "slug": "missing",
+                        "title": "Missing",
+                        "url": "https://example.com/missing",
+                        "source_path": "missing.md",
+                        "bib_keys": ["missing"],
+                    }
+                ]
+            },
+        )
+        self.assertEqual(unknown.status_code, 400)
 
     def test_selected_save_and_database_derived_export(self) -> None:
         response = self.client.post(
