@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "fastapi",
-  "installCommand": "uv pip install --system -r apps/api/requirements.txt",
+  "installCommand": "uv pip install --system -r requirements.txt",
   "buildCommand": "true"
 }
