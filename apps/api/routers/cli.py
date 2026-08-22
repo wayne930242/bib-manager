@@ -1,130 +1,43 @@
-import subprocess
-from pathlib import Path
+"""Explicit DB-first import/export operations for local workflows."""
+
 from fastapi import APIRouter, HTTPException
 
 from services import database as db
 
 router = APIRouter(prefix="/cli", tags=["cli"])
 
-# Project root (phd-essay) and the sibling literature repo that now holds
-# references/, scripts/convert_zotero.py, and scripts/fix_bib.py
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent
-LITERATURE_ROOT = PROJECT_ROOT.parent / "literature"
 
-
-@router.post("/sync")
-def sync_bibliography():
-    """
-    Sync bibliography:
-    1. Run convert-zotero (if JSON exists)
-    2. Run fix-bib
-    3. Rebuild database from BibTeX
-    """
-    results = {"steps": []}
-
-    # Step 1: Convert Zotero (if JSON exists)
-    zotero_json = LITERATURE_ROOT / "references" / "Exported Items.json"
-    if zotero_json.exists():
-        try:
-            result = subprocess.run(
-                ["uv", "run", "convert-zotero"],
-                cwd=LITERATURE_ROOT,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            results["steps"].append({
-                "name": "convert-zotero",
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr if result.returncode != 0 else None
-            })
-        except subprocess.TimeoutExpired:
-            results["steps"].append({
-                "name": "convert-zotero",
-                "success": False,
-                "error": "Timeout"
-            })
-    else:
-        results["steps"].append({
-            "name": "convert-zotero",
-            "success": True,
-            "output": "Skipped (no Zotero JSON found)"
-        })
-
-    # Step 2: Fix bibliography
+@router.post("/export")
+def export_bibliography():
+    """Generate the shared Typst BibTeX file from the canonical DB."""
     try:
-        result = subprocess.run(
-            ["uv", "run", "fix-bib"],
-            cwd=LITERATURE_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        results["steps"].append({
-            "name": "fix-bib",
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr if result.returncode != 0 else None
-        })
-    except subprocess.TimeoutExpired:
-        results["steps"].append({
-            "name": "fix-bib",
-            "success": False,
-            "error": "Timeout"
-        })
+        content = db.export_bibtex(output_path=db.BIB_PATH)
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    return {
+        "success": True,
+        "direction": "database-to-bibtex",
+        "output": str(db.BIB_PATH),
+        "entries_exported": content.count("\n@") + bool(content),
+    }
 
-    # Step 3: Sync database
+
+@router.post("/sync", deprecated=True)
+def legacy_sync_alias():
+    """Backward-compatible alias; sync now only exports DB to BibTeX."""
+    return export_bibliography()
+
+
+@router.post("/import-legacy")
+def import_legacy_bibliography(replace: bool = False):
+    """Explicit one-way migration from the legacy BibTeX file into the DB."""
     try:
-        count = db.sync_from_bibtex()
-        results["steps"].append({
-            "name": "sync-database",
-            "success": True,
-            "output": f"Synced {count} entries to database"
-        })
-    except Exception as e:
-        results["steps"].append({
-            "name": "sync-database",
-            "success": False,
-            "error": str(e)
-        })
-
-    # Overall success
-    results["success"] = all(step["success"] for step in results["steps"])
-
-    return results
-
-
-@router.post("/fix")
-def fix_bibliography():
-    """Run fix-bib only."""
-    try:
-        result = subprocess.run(
-            ["uv", "run", "fix-bib"],
-            cwd=LITERATURE_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        return {
-            "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr if result.returncode != 0 else None
-        }
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Command timeout")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/rebuild-db")
-def rebuild_database():
-    """Rebuild database from current BibTeX file."""
-    try:
-        count = db.sync_from_bibtex()
-        return {
-            "success": True,
-            "entries_synced": count
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        count = db.import_bibtex(db.BIB_PATH, replace=replace)
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {
+        "success": True,
+        "direction": "bibtex-to-database",
+        "entries_imported": count,
+        "replace": replace,
+    }

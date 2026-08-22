@@ -1,14 +1,14 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Search, LayoutGrid, List, RefreshCw, Check } from "lucide-react"
+import { Search, LayoutGrid, List, Download, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EntryTable } from "@/components/entry-table"
 import { EntryCard } from "@/components/entry-card"
 import { EntryDialog } from "@/components/entry-dialog"
-import { getEntries, searchEntries, syncBibliography, getCiteFormat, type Entry } from "@/lib/api"
+import { getEntries, searchEntries, exportBibliography, getCiteFormat, type Entry } from "@/lib/api"
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -22,7 +22,7 @@ function useDebounce<T>(value: T, delay: number): T {
 export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [loading, setLoading] = useState(true)
-  const [syncing, setSyncing] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [query, setQuery] = useState("")
   const [view, setView] = useState<"table" | "card">("table")
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null)
@@ -53,15 +53,14 @@ export default function Home() {
     loadEntries()
   }, [loadEntries])
 
-  const handleSync = async () => {
-    setSyncing(true)
+  const handleExport = async () => {
+    setExporting(true)
     try {
-      await syncBibliography()
-      await loadEntries()
+      await exportBibliography()
     } catch (error) {
-      console.error("Sync failed:", error)
+      console.error("Export failed:", error)
     } finally {
-      setSyncing(false)
+      setExporting(false)
     }
   }
 
@@ -95,11 +94,11 @@ export default function Home() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleSync}
-            disabled={syncing}
+            onClick={handleExport}
+            disabled={exporting}
           >
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            Sync
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting…" : "Export .bib"}
           </Button>
         </div>
       </header>

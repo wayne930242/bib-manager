@@ -1,10 +1,45 @@
-from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
-from models.entry import Entry, EntryList, NoteUpdate, CiteFormat, Stats
+from fastapi import APIRouter, HTTPException, Query
+
+from models.entry import (
+    BibExportRequest,
+    CiteFormat,
+    Entry,
+    EntryBatchUpsert,
+    EntryList,
+    EntryUpsert,
+    NoteUpdate,
+    Stats,
+)
 from services import database as db
 
 router = APIRouter(prefix="/entries", tags=["entries"])
+
+
+@router.post("", response_model=Entry)
+def save_entry(entry: EntryUpsert):
+    """Insert or update one entry in the canonical database."""
+    return Entry(**db.upsert_entry(entry.model_dump(exclude_none=True)))
+
+
+@router.post("/batch")
+def save_entries(batch: EntryBatchUpsert):
+    """Atomically insert or update selected discovery results."""
+    entries = db.upsert_entries(
+        entry.model_dump(exclude_none=True) for entry in batch.entries
+    )
+    return {"entries": [Entry(**entry) for entry in entries], "saved": len(entries)}
+
+
+@router.post("/export")
+def export_entries(request: BibExportRequest):
+    """Render selected entries from the DB without writing a file."""
+    try:
+        content = db.export_bibtex(request.keys)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"content": content, "count": content.count("\n@") + bool(content)}
 
 
 @router.get("", response_model=EntryList)

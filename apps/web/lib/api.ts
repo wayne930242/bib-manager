@@ -63,8 +63,8 @@ export async function updateNotes(key: string, notes: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to update notes")
 }
 
-export async function syncBibliography(): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/api/cli/sync`, { method: "POST" })
-  if (!res.ok) throw new Error("Failed to sync")
+export async function exportBibliography(): Promise<{ success: boolean }> {
+  const res = await fetch(`${API_BASE}/api/cli/export`, { method: "POST" })
+  if (!res.ok) throw new Error("Failed to export bibliography")
   return res.json()
 }

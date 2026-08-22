@@ -1,4 +1,6 @@
+import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,7 +10,8 @@ from services import database as db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Load entries from BibTeX file
+    # Startup creates the canonical database. Legacy BibTeX is imported only
+    # once for a brand-new DB and never overwrites an existing library.
     db.init_db()
     yield
     # Shutdown: cleanup if needed
@@ -16,16 +19,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="BibTeX Manager API",
-    description="API for managing BibTeX bibliography with notes and search",
-    version="0.1.0",
+    title="Bibliography Database API",
+    description="DB-first research library with on-demand BibTeX exports",
+    version="0.2.0",
     lifespan=lifespan
 )
 
-# CORS for Next.js frontend
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "BIB_CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+    ).split(",")
+    if origin.strip()
+]
+
+# CORS for the local or deployed Next.js frontend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,7 +49,12 @@ app.include_router(cli.router, prefix="/api")
 
 @app.get("/")
 def root():
-    return {"message": "BibTeX Manager API", "docs": "/docs"}
+    return {
+        "message": "Bibliography Database API",
+        "source_of_truth": "database",
+        "database_backend": db.database_backend(),
+        "docs": "/docs",
+    }
 
 
 @app.get("/health")
