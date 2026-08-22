@@ -2,7 +2,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API_ROOT="$REPO_ROOT/apps/api"
 ENV_FILE="${BIB_ENV_FILE:-$REPO_ROOT/.env.local}"
 VERCEL_PROJECT="${VERCEL_API_PROJECT:-bib-manager-api}"
 VERCEL_COMMAND="${VERCEL_BIN:-vercel}"
@@ -22,18 +21,18 @@ for name in DATABASE_URL DATABASE_URL_UNPOOLED BIB_SYNC_TOKEN; do
   fi
 done
 
-if [[ ! -f "$API_ROOT/.vercel/project.json" ]]; then
-  "$VERCEL_COMMAND" link --cwd "$API_ROOT" --yes --project "$VERCEL_PROJECT"
+if [[ ! -f "$REPO_ROOT/.vercel/project.json" ]]; then
+  "$VERCEL_COMMAND" link --cwd "$REPO_ROOT" --yes --project "$VERCEL_PROJECT"
 fi
 
 for target in production preview; do
-  printf '%s' "$DATABASE_URL" | "$VERCEL_COMMAND" env add DATABASE_URL "$target" --sensitive --force --cwd "$API_ROOT"
-  printf '%s' "$DATABASE_URL_UNPOOLED" | "$VERCEL_COMMAND" env add DATABASE_URL_UNPOOLED "$target" --sensitive --force --cwd "$API_ROOT"
-  printf '%s' "$BIB_SYNC_TOKEN" | "$VERCEL_COMMAND" env add BIB_SYNC_TOKEN "$target" --sensitive --force --cwd "$API_ROOT"
-  printf '%s' "$CORS_ORIGINS" | "$VERCEL_COMMAND" env add BIB_CORS_ORIGINS "$target" --force --cwd "$API_ROOT"
+  printf '%s' "$DATABASE_URL" | "$VERCEL_COMMAND" env add DATABASE_URL "$target" --sensitive --force --cwd "$REPO_ROOT"
+  printf '%s' "$DATABASE_URL_UNPOOLED" | "$VERCEL_COMMAND" env add DATABASE_URL_UNPOOLED "$target" --sensitive --force --cwd "$REPO_ROOT"
+  printf '%s' "$BIB_SYNC_TOKEN" | "$VERCEL_COMMAND" env add BIB_SYNC_TOKEN "$target" --sensitive --force --cwd "$REPO_ROOT"
+  printf '%s' "$CORS_ORIGINS" | "$VERCEL_COMMAND" env add BIB_CORS_ORIGINS "$target" --force --cwd "$REPO_ROOT"
 done
 
 printf '%s' "$BIB_SYNC_TOKEN" | gh secret set BIB_SYNC_TOKEN --repo wayne930242/bib-manager
 printf '%s' "$BIB_SYNC_TOKEN" | gh secret set BIB_SYNC_TOKEN --repo wayne930242/blog
 
-"$VERCEL_COMMAND" deploy --cwd "$API_ROOT" --prod --yes
+"$VERCEL_COMMAND" deploy --cwd "$REPO_ROOT" --prod --yes

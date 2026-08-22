@@ -1,15 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "fastapi",
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/api/index"
-    }
-  ],
-  "functions": {
-    "api/index.py": {
-      "excludeFiles": "{tests/**,__pycache__/**,**/*.pyc}"
-    }
-  }
+  "installCommand": "uv pip install --system -r apps/api/requirements.txt",
+  "buildCommand": "true"
 }

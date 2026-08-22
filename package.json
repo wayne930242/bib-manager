@@ -7,6 +7,7 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "clean": "turbo clean",
+    "test:api": "bash scripts/test-api.sh",
     "deploy:api": "bash scripts/configure-vercel-api.sh"
   },
   "devDependencies": {
