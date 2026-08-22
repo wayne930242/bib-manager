@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { Search, LayoutGrid, List, RefreshCw, Copy, Check } from "lucide-react"
+import { Search, LayoutGrid, List, RefreshCw, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -32,7 +32,6 @@ export default function Home() {
   const debouncedQuery = useDebounce(query, 300)
 
   const loadEntries = useCallback(async () => {
-    setLoading(true)
     try {
       if (debouncedQuery.trim()) {
         const result = await searchEntries(debouncedQuery)
@@ -176,6 +175,7 @@ export default function Home() {
       </main>
 
       <EntryDialog
+        key={selectedEntry?.key ?? "closed"}
         entry={selectedEntry}
         onClose={() => setSelectedEntry(null)}
         onCopy={handleCopy}

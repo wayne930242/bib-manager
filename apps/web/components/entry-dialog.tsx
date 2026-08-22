@@ -20,18 +20,23 @@ interface EntryDialogProps {
 }
 
 export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
-  const [notes, setNotes] = useState("")
+  const [notes, setNotes] = useState(() => entry?.notes || "")
   const [saving, setSaving] = useState(false)
   const [citeFormats, setCiteFormats] = useState<CiteFormat | null>(null)
   const [activeTab, setActiveTab] = useState("details")
 
   useEffect(() => {
-    if (entry) {
-      setNotes(entry.notes || "")
-      getCiteFormat(entry.key).then(setCiteFormats).catch(console.error)
-    } else {
-      setNotes("")
-      setCiteFormats(null)
+    if (!entry) return
+
+    let cancelled = false
+    getCiteFormat(entry.key)
+      .then((formats) => {
+        if (!cancelled) setCiteFormats(formats)
+      })
+      .catch(console.error)
+
+    return () => {
+      cancelled = true
     }
   }, [entry])
 
@@ -116,7 +121,7 @@ export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => citeFormats && copyToClipboard(citeFormats.typst)}
+                  onClick={() => onCopy(entry.key)}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>
