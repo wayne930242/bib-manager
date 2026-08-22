@@ -53,3 +53,14 @@ The sync endpoint requires `Authorization: Bearer $BIB_SYNC_TOKEN`. The `blog`
 repository runs its sync workflow after related content reaches `main`; it uses
 a GitHub variable named
 `BIB_MANAGER_API_URL` and a GitHub secret named `BIB_SYNC_TOKEN`.
+
+For a repeatable Vercel deployment, set `BIB_SYNC_TOKEN` alongside the Neon
+variables in `.env.local`, authenticate `vercel` and `gh`, then run:
+
+```bash
+pnpm deploy:api
+```
+
+The script configures encrypted Production/Preview variables, synchronizes the
+shared GitHub secret, and deploys `apps/api`. Local development continues to
+read `.env.local`; Vercel does not accept Sensitive variables for Development.
