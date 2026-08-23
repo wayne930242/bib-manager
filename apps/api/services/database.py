@@ -7,6 +7,7 @@ export, except for an explicit or one-time legacy import.
 
 import json
 import os
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -63,6 +64,7 @@ entries_table = Table(
     _schema,
     Column("key", String(255), primary_key=True),
     Column("entry_type", String(50), nullable=False),
+    Column("academic_fields", JSON, nullable=False),
     Column("title", Text, nullable=False, default=""),
     Column("author", Text, nullable=False, default=""),
     Column("year", String(50), nullable=False, default=""),
@@ -195,13 +197,30 @@ def _parse_bibtex(text: str) -> list[dict[str, str]]:
     return [dict(entry) for entry in parsed.entries]
 
 
-def _normalise_entry(entry: Mapping[str, Any]) -> tuple[str, str, dict[str, str]]:
+def _normalise_academic_fields(value: Any) -> list[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("Bibliography entry requires academic_fields")
+    academic_fields = list(dict.fromkeys(str(field).strip() for field in value))
+    if not academic_fields:
+        raise ValueError("Bibliography entry requires at least one academic field")
+    if any(
+        not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", field)
+        for field in academic_fields
+    ):
+        raise ValueError("Academic fields must be lowercase kebab-case slugs")
+    return academic_fields
+
+
+def _normalise_entry(
+    entry: Mapping[str, Any],
+) -> tuple[str, str, list[str], dict[str, str]]:
     key = str(entry.get("ID") or entry.get("key") or "").strip()
     if not key:
         raise ValueError("Bibliography entry is missing a citation key")
     entry_type = str(
         entry.get("ENTRYTYPE") or entry.get("entry_type") or "misc"
     ).strip().lower()
+    academic_fields = _normalise_academic_fields(entry.get("academic_fields"))
     fields: dict[str, str] = {}
     supplied_fields = entry.get("fields")
     if isinstance(supplied_fields, Mapping):
@@ -212,11 +231,20 @@ def _normalise_entry(entry: Mapping[str, Any]) -> tuple[str, str, dict[str, str]
                 if value is not None and str(value) != ""
             }
         )
-    reserved = {"ID", "ENTRYTYPE", "key", "entry_type", "fields", "notes", "content"}
+    reserved = {
+        "ID",
+        "ENTRYTYPE",
+        "key",
+        "entry_type",
+        "academic_fields",
+        "fields",
+        "notes",
+        "content",
+    }
     for field, value in entry.items():
         if field not in reserved and value is not None and str(value) != "":
             fields[str(field).lower()] = str(value)
-    return key, entry_type, fields
+    return key, entry_type, academic_fields, fields
 
 
 def _entry_to_bibtex(key: str, entry_type: str, fields: Mapping[str, str]) -> str:
@@ -245,9 +273,13 @@ def _row_to_entry(row: RowMapping) -> dict[str, Any]:
     fields = row["fields"]
     if isinstance(fields, str):
         fields = json.loads(fields)
+    academic_fields = row["academic_fields"]
+    if isinstance(academic_fields, str):
+        academic_fields = json.loads(academic_fields)
     return {
         "key": row["key"],
         "entry_type": row["entry_type"],
+        "academic_fields": academic_fields,
         **{field: row[field] for field in _STANDARD_FIELDS},
         "fields": fields,
         "content": _entry_to_bibtex(row["key"], row["entry_type"], fields),
@@ -307,7 +339,7 @@ def _upsert_with_connection(
     *,
     sort_order: int | None = None,
 ) -> dict[str, Any]:
-    key, entry_type, fields = _normalise_entry(entry)
+    key, entry_type, academic_fields, fields = _normalise_entry(entry)
     now = datetime.now(UTC)
     existing = connection.execute(
         select(entries_table).where(entries_table.c.key == key)
@@ -322,6 +354,7 @@ def _upsert_with_connection(
     )
     values = {
         "entry_type": entry_type,
+        "academic_fields": academic_fields,
         **{field: fields.get(field, "") for field in _STANDARD_FIELDS},
         "fields": fields,
         "notes": notes,
@@ -470,6 +503,7 @@ def import_bibtex(bib_path: Path = BIB_PATH, *, replace: bool = False) -> int:
         if replace:
             connection.execute(delete(entries_table))
         for index, entry in enumerate(parsed_entries):
+            entry["academic_fields"] = ["philosophy"]
             _upsert_with_connection(
                 connection, entry, sort_order=index if replace else None
             )

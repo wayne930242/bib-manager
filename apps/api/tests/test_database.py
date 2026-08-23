@@ -1,6 +1,10 @@
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 
 from services import database as db
 
@@ -44,12 +48,14 @@ class DatabaseFirstTests(unittest.TestCase):
                 {
                     "key": "alpha",
                     "entry_type": "article",
+                    "academic_fields": ["philosophy"],
                     "fields": {"title": "Alpha", "doi": "10.1/alpha"},
                     "notes": "read",
                 },
                 {
                     "key": "beta",
                     "entry_type": "book",
+                    "academic_fields": ["philosophy"],
                     "title": "Beta",
                     "publisher": "Press",
                 },
@@ -64,7 +70,14 @@ class DatabaseFirstTests(unittest.TestCase):
 
     def test_export_file_is_derived_without_changing_database(self) -> None:
         db.init_db()
-        db.upsert_entry({"key": "one", "entry_type": "misc", "title": "One"})
+        db.upsert_entry(
+            {
+                "key": "one",
+                "entry_type": "misc",
+                "academic_fields": ["philosophy"],
+                "title": "One",
+            }
+        )
         db.export_bibtex(output_path=db.BIB_PATH)
         db.BIB_PATH.write_text("@misc{tampered,}\n", encoding="utf-8")
 
@@ -78,6 +91,47 @@ class DatabaseFirstTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Duplicate citation keys"):
             db.import_bibtex(db.BIB_PATH)
+
+    def test_academic_fields_migration_backfills_existing_entries(self) -> None:
+        config = Config(str(db.API_ROOT / "alembic.ini"))
+        command.upgrade(config, "20260822_01")
+        now = datetime.now(UTC).isoformat()
+        with db.engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                INSERT INTO entries (
+                    key, entry_type, title, author, year, journal, publisher,
+                    fields, notes, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy-philosophy",
+                    "article",
+                    "Legacy",
+                    "",
+                    "2026",
+                    "",
+                    "",
+                    "{}",
+                    "",
+                    0,
+                    now,
+                    now,
+                ),
+            )
+
+        command.upgrade(config, "head")
+        with db.engine.connect() as connection:
+            row = connection.exec_driver_sql(
+                "SELECT academic_fields FROM entries WHERE key = ?",
+                ("legacy-philosophy",),
+            ).mappings().one()
+        fields = row["academic_fields"]
+        if isinstance(fields, str):
+            import json
+
+            fields = json.loads(fields)
+        self.assertEqual(fields, ["philosophy"])
 
 
 if __name__ == "__main__":

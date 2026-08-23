@@ -39,6 +39,7 @@ class DatabaseApiTests(unittest.TestCase):
             json={
                 "key": "fine1994",
                 "entry_type": "article",
+                "academic_fields": ["philosophy"],
                 "title": "Essence and Modality",
             },
         ).raise_for_status()
@@ -97,6 +98,7 @@ class DatabaseApiTests(unittest.TestCase):
                     {
                         "key": "kripke1959",
                         "entry_type": "article",
+                        "academic_fields": ["philosophy"],
                         "fields": {
                             "author": "Saul Kripke",
                             "title": "A Completeness Theorem in Modal Logic",
@@ -115,10 +117,55 @@ class DatabaseApiTests(unittest.TestCase):
         self.assertEqual(export.status_code, 200)
         self.assertIn("@article{kripke1959", export.json()["content"])
 
+    def test_entry_academic_fields_are_required_normalized_and_returned(self) -> None:
+        missing = self.client.post(
+            "/api/entries",
+            json={"key": "unclassified", "fields": {"title": "Unclassified"}},
+        )
+        self.assertEqual(missing.status_code, 422)
+
+        invalid = self.client.post(
+            "/api/entries",
+            json={
+                "key": "invalid-field",
+                "academic_fields": ["Philosophy"],
+                "fields": {"title": "Invalid"},
+            },
+        )
+        self.assertEqual(invalid.status_code, 422)
+
+        saved = self.client.post(
+            "/api/entries",
+            json={
+                "key": "interdisciplinary",
+                "academic_fields": [
+                    "philosophy",
+                    "computer-science",
+                    "philosophy",
+                ],
+                "fields": {"title": "Interdisciplinary"},
+            },
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(
+            saved.json()["academic_fields"],
+            ["philosophy", "computer-science"],
+        )
+        self.assertEqual(
+            self.client.get("/api/entries/interdisciplinary").json()[
+                "academic_fields"
+            ],
+            ["philosophy", "computer-science"],
+        )
+
     def test_sync_alias_only_exports_database_to_bibtex(self) -> None:
         self.client.post(
             "/api/entries",
-            json={"key": "db-first", "fields": {"title": "Canonical"}},
+            json={
+                "key": "db-first",
+                "academic_fields": ["philosophy"],
+                "fields": {"title": "Canonical"},
+            },
         )
         response = self.client.post("/api/cli/sync")
         self.assertEqual(response.status_code, 200)
