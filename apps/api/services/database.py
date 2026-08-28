@@ -8,6 +8,7 @@ export, except for an explicit or one-time legacy import.
 import json
 import os
 import re
+import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,15 +24,19 @@ from dotenv import load_dotenv
 from rapidfuzz import fuzz
 from sqlalchemy import (
     JSON,
+    BigInteger,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     MetaData,
     String,
     Table,
     Text,
     UniqueConstraint,
+    case,
     create_engine,
     delete,
     event,
@@ -126,11 +131,52 @@ entry_blog_posts_table = Table(
     Column("notes", Text, nullable=False, default=""),
 )
 
+SOURCE_ASSET_KINDS = frozenset(
+    {
+        "published-pdf",
+        "author-manuscript-pdf",
+        "source-document",
+        "extracted-text",
+        "reading-notes",
+        "reading-summary",
+        "supplement",
+    }
+)
+PDF_ASSET_KINDS = ("published-pdf", "author-manuscript-pdf")
+
+source_assets_table = Table(
+    "source_assets",
+    _schema,
+    Column("id", String(36), primary_key=True),
+    Column(
+        "entry_key",
+        String(255),
+        ForeignKey("entries.key", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("kind", String(50), nullable=False),
+    Column("filename", Text, nullable=False),
+    Column("media_type", String(255), nullable=False),
+    Column("byte_size", BigInteger, nullable=False),
+    Column("sha256", String(64), nullable=False),
+    Column("storage_key", Text, nullable=False),
+    Column("source_url", Text, nullable=True),
+    Column("status", String(20), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("byte_size > 0", name="ck_source_asset_byte_size"),
+    CheckConstraint(
+        "status IN ('pending', 'ready', 'failed')",
+        name="ck_source_asset_status",
+    ),
+    UniqueConstraint("entry_key", "sha256", name="uq_source_asset_entry_sha256"),
+    UniqueConstraint("storage_key", name="uq_source_asset_storage_key"),
+    Index("ix_source_assets_entry_status", "entry_key", "status"),
+)
+
 
 def _default_database_url() -> str:
-    data_home = Path(
-        os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
-    )
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     database_path = data_home / "knowledge-base" / "library.sqlite3"
     database_path.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite:///{database_path}"
@@ -217,9 +263,9 @@ def _normalise_entry(
     key = str(entry.get("ID") or entry.get("key") or "").strip()
     if not key:
         raise ValueError("Bibliography entry is missing a citation key")
-    entry_type = str(
-        entry.get("ENTRYTYPE") or entry.get("entry_type") or "misc"
-    ).strip().lower()
+    entry_type = (
+        str(entry.get("ENTRYTYPE") or entry.get("entry_type") or "misc").strip().lower()
+    )
     academic_fields = _normalise_academic_fields(entry.get("academic_fields"))
     fields: dict[str, str] = {}
     supplied_fields = entry.get("fields")
@@ -269,6 +315,20 @@ def _entry_to_bibtex(key: str, entry_type: str, fields: Mapping[str, str]) -> st
     return "\n".join(lines)
 
 
+def _entry_select():
+    has_pdf = (
+        select(source_assets_table.c.id)
+        .where(
+            source_assets_table.c.entry_key == entries_table.c.key,
+            source_assets_table.c.status == "ready",
+            source_assets_table.c.media_type == "application/pdf",
+        )
+        .exists()
+        .label("has_pdf")
+    )
+    return select(entries_table, has_pdf)
+
+
 def _row_to_entry(row: RowMapping) -> dict[str, Any]:
     fields = row["fields"]
     if isinstance(fields, str):
@@ -284,6 +344,7 @@ def _row_to_entry(row: RowMapping) -> dict[str, Any]:
         "fields": fields,
         "content": _entry_to_bibtex(row["key"], row["entry_type"], fields),
         "notes": row["notes"],
+        "has_pdf": bool(row.get("has_pdf", False)),
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -341,9 +402,11 @@ def _upsert_with_connection(
 ) -> dict[str, Any]:
     key, entry_type, academic_fields, fields = _normalise_entry(entry)
     now = datetime.now(UTC)
-    existing = connection.execute(
-        select(entries_table).where(entries_table.c.key == key)
-    ).mappings().first()
+    existing = (
+        connection.execute(select(entries_table).where(entries_table.c.key == key))
+        .mappings()
+        .first()
+    )
     order = existing["sort_order"] if existing else sort_order
     if order is None:
         order = _next_sort_order(connection)
@@ -373,9 +436,11 @@ def _upsert_with_connection(
                 **values,
             )
         )
-    row = connection.execute(
-        select(entries_table).where(entries_table.c.key == key)
-    ).mappings().one()
+    row = (
+        connection.execute(_entry_select().where(entries_table.c.key == key))
+        .mappings()
+        .one()
+    )
     return _row_to_entry(row)
 
 
@@ -385,7 +450,9 @@ def _set_setting(connection: Connection, key: str, value: str) -> None:
     ).first()
     if exists:
         connection.execute(
-            update(settings_table).where(settings_table.c.key == key).values(value=value)
+            update(settings_table)
+            .where(settings_table.c.key == key)
+            .values(value=value)
         )
     else:
         connection.execute(insert(settings_table).values(key=key, value=value))
@@ -424,9 +491,7 @@ def init_db() -> None:
         import_bibtex(BIB_PATH, replace=True)
     with engine.begin() as connection:
         _migrate_legacy_notes(connection)
-        _set_setting(
-            connection, "bootstrap_completed", datetime.now(UTC).isoformat()
-        )
+        _set_setting(connection, "bootstrap_completed", datetime.now(UTC).isoformat())
 
 
 def upsert_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
@@ -458,11 +523,7 @@ def sync_blog_posts(posts: Iterable[Mapping[str, Any]]) -> tuple[int, int]:
     slugs = [str(item["slug"]) for item in items]
     if len(set(slugs)) != len(slugs):
         raise ValueError("Blog post payload contains duplicate slugs")
-    keys = {
-        str(key)
-        for item in items
-        for key in item.get("bib_keys", [])
-    }
+    keys = {str(key) for item in items for key in item.get("bib_keys", [])}
     now = datetime.now(UTC)
     relations = 0
     with engine.begin() as connection:
@@ -518,16 +579,24 @@ def export_bibtex(
     """Render a full or selected BibTeX export from the canonical DB."""
     with engine.connect() as connection:
         if keys is None:
-            rows = connection.execute(
-                select(entries_table).order_by(entries_table.c.sort_order)
-            ).mappings().all()
+            rows = (
+                connection.execute(
+                    select(entries_table).order_by(entries_table.c.sort_order)
+                )
+                .mappings()
+                .all()
+            )
         else:
             rows = []
             missing = []
             for key in keys:
-                row = connection.execute(
-                    select(entries_table).where(entries_table.c.key == key)
-                ).mappings().first()
+                row = (
+                    connection.execute(
+                        select(entries_table).where(entries_table.c.key == key)
+                    )
+                    .mappings()
+                    .first()
+                )
                 if row is None:
                     missing.append(key)
                 else:
@@ -535,8 +604,7 @@ def export_bibtex(
             if missing:
                 raise KeyError(f"Unknown citation keys: {', '.join(missing)}")
     rendered = "\n\n".join(
-        _entry_to_bibtex(row["key"], row["entry_type"], row["fields"])
-        for row in rows
+        _entry_to_bibtex(row["key"], row["entry_type"], row["fields"]) for row in rows
     )
     if rendered:
         rendered += "\n"
@@ -554,26 +622,28 @@ def get_entries(page: int = 1, per_page: int = 50) -> tuple[list[dict], int]:
         total = connection.execute(
             select(func.count()).select_from(entries_table)
         ).scalar_one()
-        rows = connection.execute(
-            select(entries_table)
-            .order_by(entries_table.c.sort_order)
-            .limit(per_page)
-            .offset(offset)
-        ).mappings().all()
-        entries = _attach_blog_posts(
-            connection, [_row_to_entry(row) for row in rows]
+        rows = (
+            connection.execute(
+                _entry_select()
+                .order_by(entries_table.c.sort_order)
+                .limit(per_page)
+                .offset(offset)
+            )
+            .mappings()
+            .all()
         )
+        entries = _attach_blog_posts(connection, [_row_to_entry(row) for row in rows])
     return entries, total
 
 
 def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dict]:
     with engine.connect() as connection:
-        rows = connection.execute(
-            select(entries_table).order_by(entries_table.c.sort_order)
-        ).mappings().all()
-        entries = _attach_blog_posts(
-            connection, [_row_to_entry(row) for row in rows]
+        rows = (
+            connection.execute(_entry_select().order_by(entries_table.c.sort_order))
+            .mappings()
+            .all()
         )
+        entries = _attach_blog_posts(connection, [_row_to_entry(row) for row in rows])
     query_lower = query.lower().strip()
     if not query_lower:
         return entries[:limit]
@@ -606,12 +676,12 @@ def search_entries(query: str, limit: int = 50, threshold: int = 55) -> list[dic
 
 def get_entry(key: str) -> Optional[dict]:
     with engine.connect() as connection:
-        row = connection.execute(
-            select(entries_table).where(entries_table.c.key == key)
-        ).mappings().first()
-        entries = _attach_blog_posts(
-            connection, [_row_to_entry(row)] if row else []
+        row = (
+            connection.execute(_entry_select().where(entries_table.c.key == key))
+            .mappings()
+            .first()
         )
+        entries = _attach_blog_posts(connection, [_row_to_entry(row)] if row else [])
     return entries[0] if entries else None
 
 
@@ -625,11 +695,210 @@ def update_notes(key: str, notes: str) -> bool:
         return result.rowcount > 0
 
 
+def _source_asset_to_dict(row: RowMapping) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "entry_key": row["entry_key"],
+        "kind": row["kind"],
+        "filename": row["filename"],
+        "media_type": row["media_type"],
+        "byte_size": row["byte_size"],
+        "sha256": row["sha256"],
+        "storage_key": row["storage_key"],
+        "source_url": row["source_url"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def create_source_asset(
+    *,
+    asset_id: str | None = None,
+    entry_key: str,
+    kind: str,
+    filename: str,
+    media_type: str,
+    byte_size: int,
+    sha256: str,
+    storage_key: str,
+    source_url: str | None = None,
+) -> dict[str, Any]:
+    """Create one pending private asset, deduplicated within its entry."""
+    if kind not in SOURCE_ASSET_KINDS:
+        raise ValueError(f"Unsupported source asset kind: {kind}")
+    if not filename.strip():
+        raise ValueError("Source asset filename is required")
+    if byte_size <= 0:
+        raise ValueError("Source asset byte size must be positive")
+    normalized_sha256 = sha256.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", normalized_sha256):
+        raise ValueError("Source asset SHA-256 must be 64 lowercase hex characters")
+    now = datetime.now(UTC)
+    with engine.begin() as connection:
+        _require_entry_keys(connection, {entry_key})
+        existing = (
+            connection.execute(
+                select(source_assets_table).where(
+                    source_assets_table.c.entry_key == entry_key,
+                    source_assets_table.c.sha256 == normalized_sha256,
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if existing:
+            return _source_asset_to_dict(existing)
+        asset_id = asset_id or str(uuid.uuid4())
+        connection.execute(
+            insert(source_assets_table).values(
+                id=asset_id,
+                entry_key=entry_key,
+                kind=kind,
+                filename=filename.strip(),
+                media_type=media_type.strip() or "application/octet-stream",
+                byte_size=byte_size,
+                sha256=normalized_sha256,
+                storage_key=storage_key,
+                source_url=source_url,
+                status="pending",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        row = (
+            connection.execute(
+                select(source_assets_table).where(source_assets_table.c.id == asset_id)
+            )
+            .mappings()
+            .one()
+        )
+    return _source_asset_to_dict(row)
+
+
+def get_source_assets(entry_key: str) -> list[dict[str, Any]]:
+    with engine.connect() as connection:
+        rows = (
+            connection.execute(
+                select(source_assets_table)
+                .where(source_assets_table.c.entry_key == entry_key)
+                .order_by(source_assets_table.c.created_at, source_assets_table.c.id)
+            )
+            .mappings()
+            .all()
+        )
+    return [_source_asset_to_dict(row) for row in rows]
+
+
+def get_source_asset(asset_id: str) -> dict[str, Any] | None:
+    with engine.connect() as connection:
+        row = (
+            connection.execute(
+                select(source_assets_table).where(source_assets_table.c.id == asset_id)
+            )
+            .mappings()
+            .first()
+        )
+    return _source_asset_to_dict(row) if row else None
+
+
+def mark_source_asset_ready(asset_id: str) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with engine.begin() as connection:
+        result = connection.execute(
+            update(source_assets_table)
+            .where(source_assets_table.c.id == asset_id)
+            .values(status="ready", updated_at=now)
+        )
+        if result.rowcount == 0:
+            raise KeyError(f"Unknown source asset: {asset_id}")
+        row = (
+            connection.execute(
+                select(source_assets_table).where(source_assets_table.c.id == asset_id)
+            )
+            .mappings()
+            .one()
+        )
+    return _source_asset_to_dict(row)
+
+
+def mark_source_asset_failed(asset_id: str) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with engine.begin() as connection:
+        result = connection.execute(
+            update(source_assets_table)
+            .where(source_assets_table.c.id == asset_id)
+            .values(status="failed", updated_at=now)
+        )
+        if result.rowcount == 0:
+            raise KeyError(f"Unknown source asset: {asset_id}")
+        row = (
+            connection.execute(
+                select(source_assets_table).where(source_assets_table.c.id == asset_id)
+            )
+            .mappings()
+            .one()
+        )
+    return _source_asset_to_dict(row)
+
+
+def mark_source_asset_pending(asset_id: str) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    with engine.begin() as connection:
+        result = connection.execute(
+            update(source_assets_table)
+            .where(source_assets_table.c.id == asset_id)
+            .values(status="pending", updated_at=now)
+        )
+        if result.rowcount == 0:
+            raise KeyError(f"Unknown source asset: {asset_id}")
+        row = (
+            connection.execute(
+                select(source_assets_table).where(source_assets_table.c.id == asset_id)
+            )
+            .mappings()
+            .one()
+        )
+    return _source_asset_to_dict(row)
+
+
+def get_preferred_pdf(entry_key: str) -> dict[str, Any] | None:
+    priority = case(
+        (source_assets_table.c.kind == "published-pdf", 0),
+        (source_assets_table.c.kind == "author-manuscript-pdf", 1),
+        else_=2,
+    )
+    with engine.connect() as connection:
+        row = (
+            connection.execute(
+                select(source_assets_table)
+                .where(
+                    source_assets_table.c.entry_key == entry_key,
+                    source_assets_table.c.status == "ready",
+                    source_assets_table.c.media_type == "application/pdf",
+                )
+                .order_by(priority, source_assets_table.c.created_at)
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
+    return _source_asset_to_dict(row) if row else None
+
+
 def get_stats() -> dict:
     with engine.connect() as connection:
-        rows = connection.execute(
-            select(entries_table.c.key, entries_table.c.entry_type, entries_table.c.notes)
-        ).mappings().all()
+        rows = (
+            connection.execute(
+                select(
+                    entries_table.c.key,
+                    entries_table.c.entry_type,
+                    entries_table.c.notes,
+                )
+            )
+            .mappings()
+            .all()
+        )
     types: dict[str, int] = {}
     for row in rows:
         types[row["entry_type"]] = types.get(row["entry_type"], 0) + 1

@@ -23,9 +23,9 @@ OneDrive, Syncthing, or another file-sync/network mount while it is live.
 Windows and mobile clients use the HTTP API rather than opening DB files.
 
 Database files and credentials are intentionally excluded from Git.
-Before exposing a hosted API publicly, add authentication and set
-`BIB_CORS_ORIGINS` to the deployed frontend origin; the current setup is a
-private data foundation, not a public multi-user service.
+Set `BIB_CORS_ORIGINS` to the deployed Bib Manager and Blog origins. Public
+entry routes expose citation metadata; private source-asset routes require a
+separate short-lived management session.
 
 Schema changes are versioned in `apps/api/migrations`. Use the unpooled direct
 connection for migrations:
@@ -48,6 +48,17 @@ API operations:
 - `POST /api/cli/export`: regenerate the shared `bibliography.bib` from DB.
 - `POST /api/cli/import-legacy`: explicit one-way legacy import.
 - `POST /api/sync/blog-posts`: replace bibliography-linked public posts.
+- `POST /api/admin/session`: exchange the independent management password for
+  a short-lived source-asset session.
+- `/api/admin/entries/{key}/assets` and `/api/admin/assets/{id}`: list, upload,
+  verify, preview, and download private source assets.
+
+Source files live in a private Cloudflare R2 bucket with `r2.dev` and public
+custom-domain access disabled. Neon stores only `source_assets` metadata. The
+API issues presigned R2 PUT/GET URLs so file bodies do not pass through Vercel.
+Configure `BIB_ADMIN_TOKEN`, `BIB_SESSION_SECRET`, and the `BIB_R2_*` variables
+from `.env.example`; never reuse `BIB_SYNC_TOKEN`. Web clients keep the issued
+session in `sessionStorage` and never persist the entered credential.
 
 The sync endpoint requires `Authorization: Bearer $BIB_SYNC_TOKEN`. The `blog`
 repository runs its sync workflow after related content reaches `main`; it uses

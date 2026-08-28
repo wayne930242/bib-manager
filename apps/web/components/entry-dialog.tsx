@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { getCiteFormat, updateNotes, type Entry, type CiteFormat } from "@/lib/api"
+import { SourceAssetsPanel } from "@/components/source-assets-panel"
 
 interface EntryDialogProps {
   entry: Entry | null
@@ -76,6 +77,7 @@ export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
             <TabsTrigger value="details" className="flex-1">Details</TabsTrigger>
             <TabsTrigger value="cite" className="flex-1">Cite</TabsTrigger>
             <TabsTrigger value="notes" className="flex-1">Notes</TabsTrigger>
+            <TabsTrigger value="assets" className="flex-1">Assets</TabsTrigger>
           </TabsList>
 
           <TabsContent value="details" className="mt-4 space-y-4">
@@ -179,6 +181,10 @@ export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
                 {saving ? "Saving..." : "Save Notes"}
               </Button>
             </div>
+          </TabsContent>
+
+          <TabsContent value="assets" className="mt-4">
+            <SourceAssetsPanel entryKey={entry.key} />
           </TabsContent>
         </Tabs>
       </DialogContent>

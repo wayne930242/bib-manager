@@ -3,8 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from routers import cli, entries, sync
+from routers import admin, cli, entries, sync
 from services import database as db
 
 
@@ -22,13 +21,14 @@ app = FastAPI(
     title="Bibliography Database API",
     description="DB-first research library with on-demand BibTeX exports",
     version="0.2.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 cors_origins = [
     origin.strip()
     for origin in os.environ.get(
-        "BIB_CORS_ORIGINS", "http://localhost:3000,http://localhost:3001"
+        "BIB_CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:3001,http://localhost:4321",
     ).split(",")
     if origin.strip()
 ]
@@ -44,6 +44,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(entries.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(cli.router, prefix="/api")
 app.include_router(sync.router, prefix="/api")
 

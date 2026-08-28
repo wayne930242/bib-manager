@@ -4,7 +4,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-
 ACADEMIC_FIELD_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -47,6 +46,7 @@ class EntryBase(BaseModel):
 
 class Entry(EntryBase):
     notes: Optional[str] = None
+    has_pdf: bool = False
     blog_posts: list[RelatedBlogPost] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
