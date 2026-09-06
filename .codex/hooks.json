@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^apply_patch$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/typst_check.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/python_check.py\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/ts_check.py\"",
+            "timeout": 90
+          }
+        ]
+      }
+    ]
+  }
+}

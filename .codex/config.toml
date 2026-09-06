@@ -1,0 +1,11 @@
+# Shared launch configuration for this Windows / Ubuntu-20.04 WSL checkout.
+# See knowledge-base/.codex/README.md before moving to another host.
+[mcp_servers.research-hub]
+command = "wsl.exe"
+args = [
+  "-d", "Ubuntu-20.04",
+  "--cd", "/home/weihung/knowledge-base/literature",
+  "--exec", "bash", "-lic",
+  "exec env DOWNLOAD_DIR=/home/weihung/knowledge-base/literature/tools/research_hub_mcp/downloads RSH_PAPER_SEARCH_PROJECT_DIR=/home/weihung/knowledge-base/literature/tools/paper-search-mcp RSH_PAPER_SEARCH_COMMAND=/home/weihung/.local/bin/uv RSH_LIBRARY_API_URL=https://bib-manager-api.vercel.app RUST_LOG=warn /home/weihung/knowledge-base/literature/tools/research_hub_mcp/target/release/rust-research-mcp",
+]
+startup_timeout_sec = 30
