@@ -2,5 +2,5 @@
 # Host parameters: knowledge-base/.codex/host.json; setup: .codex/README.md.
 [mcp_servers.research-hub]
 command = "node"
-args = ["-e", "const fs=require('fs'),p=require('path');let d=process.cwd();while(!fs.existsSync(p.join(d,'.codex/launch.cjs'))){let n=p.dirname(d);if(n===d){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}d=n}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])", "research-hub"]
+args = ["-e", "const fs=require('fs'),p=require('path'),cp=require('child_process');let d;try{d=cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();for(;;){let s=cp.execFileSync('git',['rev-parse','--show-superproject-working-tree'],{cwd:d,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();if(!s)break;d=s}}catch{d=undefined}if(!d||!fs.existsSync(p.join(d,'.codex/launch.cjs'))){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])", "research-hub"]
 startup_timeout_sec = 30
