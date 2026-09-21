@@ -1,11 +1,6 @@
-# Shared launch configuration for this Windows / Ubuntu-20.04 WSL checkout.
-# See knowledge-base/.codex/README.md before moving to another host.
+# Shared macOS / Linux / Windows-to-WSL entry point.
+# Host parameters: knowledge-base/.codex/host.json; setup: .codex/README.md.
 [mcp_servers.research-hub]
-command = "wsl.exe"
-args = [
-  "-d", "Ubuntu-20.04",
-  "--cd", "/home/weihung/knowledge-base/literature",
-  "--exec", "bash", "-lic",
-  "exec env DOWNLOAD_DIR=/home/weihung/knowledge-base/literature/tools/research_hub_mcp/downloads RSH_PAPER_SEARCH_PROJECT_DIR=/home/weihung/knowledge-base/literature/tools/paper-search-mcp RSH_PAPER_SEARCH_COMMAND=/home/weihung/.local/bin/uv RSH_LIBRARY_API_URL=https://bib-manager-api.vercel.app RUST_LOG=warn /home/weihung/knowledge-base/literature/tools/research_hub_mcp/target/release/rust-research-mcp",
-]
+command = "node"
+args = ["-e", "const fs=require('fs'),p=require('path');let d=process.cwd();while(!fs.existsSync(p.join(d,'.codex/launch.cjs'))){let n=p.dirname(d);if(n===d){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}d=n}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])", "research-hub"]
 startup_timeout_sec = 30

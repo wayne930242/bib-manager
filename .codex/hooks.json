@@ -6,17 +6,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/typst_check.py\"",
+            "command": "node -e \"const fs=require('fs'),p=require('path');let d=process.cwd();while(!fs.existsSync(p.join(d,'.codex/launch.cjs'))){let n=p.dirname(d);if(n===d){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}d=n}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])\" typst",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/python_check.py\"",
+            "command": "node -e \"const fs=require('fs'),p=require('path');let d=process.cwd();while(!fs.existsSync(p.join(d,'.codex/launch.cjs'))){let n=p.dirname(d);if(n===d){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}d=n}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])\" python",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "wsl.exe -d Ubuntu-20.04 --cd /home/weihung/knowledge-base/phd-essay --exec bash -lic \"exec python3 /home/weihung/knowledge-base/phd-essay/.codex/hooks/ts_check.py\"",
+            "command": "node -e \"const fs=require('fs'),p=require('path');let d=process.cwd();while(!fs.existsSync(p.join(d,'.codex/launch.cjs'))){let n=p.dirname(d);if(n===d){if(process.argv[1]==='research-hub'){console.error('Research launcher missing from checkout');process.exit(2)}process.exit(0)}d=n}require(p.join(d,'.codex/launch.cjs')).main(d,process.argv[1])\" ts",
             "timeout": 90
           }
         ]
