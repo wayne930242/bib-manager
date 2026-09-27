@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "research-hub": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "root=$(git rev-parse --show-superproject-working-tree 2>/dev/null); [ -n \"$root\" ] || root=$(git rev-parse --show-toplevel) || exit 1; hub=\"$root/literature/tools/research_hub_mcp\"; RSH_DOWNLOAD_DIRECTORY=\"$hub/downloads\" exec \"$hub/target/release/rust-research-mcp\""
+      ],
+      "env": {
+        "RSH_LIBRARY_API_URL": "https://bib-manager-api.vercel.app",
+        "RUST_LOG": "warn"
+      }
+    }
+  }
+}

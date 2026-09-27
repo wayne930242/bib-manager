@@ -22,10 +22,9 @@
 - 編譯驗證：需要時執行 `corepack pnpm build`。
 
 閱讀目標檔與既有測試後再改動；遷移、資料寫入及部署依本次授權範圍。
-提交只暫存本次檔案；含父層 gitlink 的交付先完成本 submodule，再處理 phd-essay 及主專案。
+提交只暫存本次檔案；含父層 gitlink 的交付先完成本 submodule，再處理 knowledge-base 主專案。
 
-## Codex
+## Pi
 
-技能位於 `.agents/skills/`；MCP 與 hooks 分別使用 literature 與 phd-essay 共用設定的同步副本。
-此 checkout 的啟動、信任及檢查限制見 [../../.codex/README.md](../../.codex/README.md)。
-檢查工具缺失或逾時要回報未完成；shell 編輯不會觸發只匹配 apply_patch 的 hook，須手動驗證。
+技能位於 `.agents/skills/`。`.mcp.json` 是 knowledge-base root 版本的實體副本，從 knowledge-base 內啟動時可連 `research-hub`。
+Pi 沒有修改後 hook；改動後自行執行上列對應驗證，工具缺失或逾時要回報未完成。
