@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import main
 from fastapi.testclient import TestClient
+
+import main
 from services import database as db
 from services.source_asset_storage import get_source_asset_storage
 
@@ -55,9 +56,10 @@ class DatabaseApiTests(unittest.TestCase):
         self.original_sync_token = os.environ.get("BIB_SYNC_TOKEN")
         self.original_admin_token = os.environ.get("BIB_ADMIN_TOKEN")
         self.original_session_secret = os.environ.get("BIB_SESSION_SECRET")
-        os.environ["BIB_SYNC_TOKEN"] = "test-sync-token"
-        os.environ["BIB_ADMIN_TOKEN"] = "test-admin-password"
-        os.environ["BIB_SESSION_SECRET"] = "test-session-secret-with-32-bytes"
+        # Test-only fixture credentials.
+        os.environ["BIB_SYNC_TOKEN"] = "test-sync-token"  # noqa: S105
+        os.environ["BIB_ADMIN_TOKEN"] = "test-admin-password"  # noqa: S105
+        os.environ["BIB_SESSION_SECRET"] = "test-session-secret-with-32-bytes"  # noqa: S105
         db.configure_database(f"sqlite:///{root / 'library.sqlite3'}")
         db.BIB_PATH = root / "bibliography.bib"
         db.LEGACY_NOTES_PATH = root / "notes.toon"
@@ -282,10 +284,10 @@ class DatabaseApiTests(unittest.TestCase):
             headers=headers,
         )
         self.assertEqual(response.status_code, 409)
-        self.assertEqual(
-            db.get_source_asset(upload["asset"]["id"])["status"],
-            "failed",
-        )
+        asset = db.get_source_asset(upload["asset"]["id"])
+        self.assertIsNotNone(asset)
+        assert asset is not None
+        self.assertEqual(asset["status"], "failed")
         self.assertIs(
             self.client.get("/api/entries/mismatch").json()["has_pdf"],
             False,

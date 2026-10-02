@@ -4,7 +4,7 @@
       "command": "sh",
       "args": [
         "-c",
-        "root=$(git rev-parse --show-superproject-working-tree 2>/dev/null); [ -n \"$root\" ] || root=$(git rev-parse --show-toplevel) || exit 1; bin=\"$root/phd-essay/node_modules/.bin/thesis-toolkit\"; [ -x \"$bin\" ] || { echo \"thesis-toolkit is not installed; run npm install in $root/phd-essay\" >&2; exit 1; }; RSH_DOWNLOAD_DIRECTORY=\"$root/literature/downloads\" exec \"$bin\" mcp research-hub"
+        "root=$(git rev-parse --show-superproject-working-tree 2>/dev/null); [ -n \"$root\" ] || root=$(git rev-parse --show-toplevel) || exit 1; bin=\"$root/phd-essay/node_modules/.bin/thesis-toolkit\"; [ -x \"$bin\" ] || { echo \"thesis-toolkit is not installed; run npm install in $root/phd-essay\" >&2; exit 1; }; creds=\"$root/literature/.env.local\"; if [ -f \"$creds\" ]; then RSH_LIBRARY_ADMIN_TOKEN=$(set -a; . \"$creds\"; printf %s \"${BIB_ADMIN_TOKEN:-}\"); export RSH_LIBRARY_ADMIN_TOKEN; fi; RSH_DOWNLOAD_DIRECTORY=\"$root/literature/downloads\" exec \"$bin\" mcp research-hub"
       ],
       "env": {
         "RSH_LIBRARY_API_URL": "https://bib-manager-api.vercel.app",
