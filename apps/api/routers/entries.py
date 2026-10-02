@@ -1,6 +1,4 @@
-from typing import Optional
-
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from models.entry import (
     BibExportRequest,
@@ -12,18 +10,21 @@ from models.entry import (
     NoteUpdate,
     Stats,
 )
+from routers.dependencies import require_admin_session
 from services import database as db
 
 router = APIRouter(prefix="/entries", tags=["entries"])
 
 
-@router.post("", response_model=Entry)
+@router.post(
+    "", response_model=Entry, dependencies=[Depends(require_admin_session)]
+)
 def save_entry(entry: EntryUpsert):
     """Insert or update one entry in the canonical database."""
     return Entry(**db.upsert_entry(entry.model_dump(exclude_none=True)))
 
 
-@router.post("/batch")
+@router.post("/batch", dependencies=[Depends(require_admin_session)])
 def save_entries(batch: EntryBatchUpsert):
     """Atomically insert or update selected discovery results."""
     entries = db.upsert_entries(
@@ -107,7 +108,7 @@ def get_notes(key: str):
     return {"key": key, "notes": entry.get("notes", "")}
 
 
-@router.patch("/{key}/notes")
+@router.patch("/{key}/notes", dependencies=[Depends(require_admin_session)])
 def update_notes(key: str, note_update: NoteUpdate):
     """Update notes for an entry."""
     if not db.update_notes(key, note_update.notes):

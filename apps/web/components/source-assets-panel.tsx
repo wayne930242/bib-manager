@@ -13,8 +13,12 @@ import {
   type SourceAsset,
   type SourceAssetKind,
 } from "@/lib/api"
-
-const SESSION_KEY = "bibliography-private-asset-session"
+import {
+  clearStoredSession,
+  readStoredSession,
+  storeSession,
+  type StoredSession,
+} from "@/lib/admin-session"
 
 const KIND_LABELS: Record<SourceAssetKind, string> = {
   "published-pdf": "Published PDF",
@@ -24,27 +28,6 @@ const KIND_LABELS: Record<SourceAssetKind, string> = {
   "reading-notes": "Reading notes",
   "reading-summary": "Reading summary",
   supplement: "Supplement",
-}
-
-interface StoredSession {
-  token: string
-  expiresAt: string
-}
-
-function readStoredSession(): StoredSession | null {
-  const stored = sessionStorage.getItem(SESSION_KEY)
-  if (!stored) return null
-  try {
-    const session = JSON.parse(stored) as StoredSession
-    if (new Date(session.expiresAt).getTime() <= Date.now()) {
-      sessionStorage.removeItem(SESSION_KEY)
-      return null
-    }
-    return session
-  } catch {
-    sessionStorage.removeItem(SESSION_KEY)
-    return null
-  }
 }
 
 async function sha256(file: File): Promise<string> {
@@ -70,7 +53,7 @@ export function SourceAssetsPanel({ entryKey }: { entryKey: string }) {
   const fileInput = useRef<HTMLInputElement>(null)
 
   const clearSession = useCallback(() => {
-    sessionStorage.removeItem(SESSION_KEY)
+    clearStoredSession()
     setSession(null)
     setAssets([])
   }, [])
@@ -113,7 +96,7 @@ export function SourceAssetsPanel({ entryKey }: { entryKey: string }) {
     try {
       const created = await createAdminSession(credential)
       const stored = { token: created.token, expiresAt: created.expires_at }
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(stored))
+      storeSession(stored)
       setSession(stored)
       setCredential("")
       await refresh(stored)

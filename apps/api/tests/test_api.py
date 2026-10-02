@@ -85,9 +85,17 @@ class DatabaseApiTests(unittest.TestCase):
             os.environ["BIB_SESSION_SECRET"] = self.original_session_secret
         self.temporary_directory.cleanup()
 
+    def admin_headers(self) -> dict[str, str]:
+        session = self.client.post(
+            "/api/admin/session",
+            json={"credential": "test-admin-password"},
+        ).json()
+        return {"Authorization": f"Bearer {session['token']}"}
+
     def test_public_entry_only_projects_pdf_availability(self) -> None:
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "private-source",
                 "entry_type": "article",
@@ -134,6 +142,7 @@ class DatabaseApiTests(unittest.TestCase):
 
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "protected-assets",
                 "academic_fields": ["philosophy"],
@@ -157,6 +166,7 @@ class DatabaseApiTests(unittest.TestCase):
     def test_private_asset_upload_completion_and_access_lifecycle(self) -> None:
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "asset-lifecycle",
                 "entry_type": "article",
@@ -243,6 +253,7 @@ class DatabaseApiTests(unittest.TestCase):
     def test_upload_completion_fails_closed_when_object_does_not_match(self) -> None:
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "mismatch",
                 "academic_fields": ["philosophy"],
@@ -299,6 +310,7 @@ class DatabaseApiTests(unittest.TestCase):
     def test_publication_sync_attaches_blog_posts(self) -> None:
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "fine1994",
                 "entry_type": "article",
@@ -357,6 +369,7 @@ class DatabaseApiTests(unittest.TestCase):
     def test_selected_save_and_database_derived_export(self) -> None:
         response = self.client.post(
             "/api/entries/batch",
+            headers=self.admin_headers(),
             json={
                 "entries": [
                     {
@@ -379,15 +392,44 @@ class DatabaseApiTests(unittest.TestCase):
         self.assertEqual(export.status_code, 200)
         self.assertIn("@article{kripke1959", export.json()["content"])
 
+    def test_write_routes_require_admin_session(self) -> None:
+        entry = {"key": "anonymous", "academic_fields": ["philosophy"], "title": "Anon"}
+        sync_token = {"Authorization": "Bearer test-sync-token"}
+        attempts = [
+            self.client.post("/api/entries", json=entry),
+            self.client.post("/api/entries", json=entry, headers=sync_token),
+            self.client.post("/api/entries/batch", json={"entries": [entry]}),
+            self.client.patch("/api/entries/anonymous/notes", json={"notes": "x"}),
+            self.client.post("/api/cli/export"),
+            self.client.post("/api/cli/sync"),
+            self.client.post("/api/cli/import-legacy"),
+        ]
+        self.assertEqual([response.status_code for response in attempts], [401] * 7)
+        self.assertIsNone(db.get_entry("anonymous"))
+
+        headers = self.admin_headers()
+        self.client.post("/api/entries", headers=headers, json=entry).raise_for_status()
+        notes = self.client.patch(
+            "/api/entries/anonymous/notes", headers=headers, json={"notes": "kept"}
+        )
+        self.assertEqual(notes.status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/entries/anonymous/notes").json()["notes"], "kept"
+        )
+        public_export = self.client.post("/api/entries/export", json={"keys": ["anonymous"]})
+        self.assertEqual(public_export.status_code, 200)
+
     def test_entry_academic_fields_are_required_normalized_and_returned(self) -> None:
         missing = self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={"key": "unclassified", "fields": {"title": "Unclassified"}},
         )
         self.assertEqual(missing.status_code, 422)
 
         invalid = self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "invalid-field",
                 "academic_fields": ["Philosophy"],
@@ -398,6 +440,7 @@ class DatabaseApiTests(unittest.TestCase):
 
         saved = self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "interdisciplinary",
                 "academic_fields": [
@@ -421,13 +464,14 @@ class DatabaseApiTests(unittest.TestCase):
     def test_sync_alias_only_exports_database_to_bibtex(self) -> None:
         self.client.post(
             "/api/entries",
+            headers=self.admin_headers(),
             json={
                 "key": "db-first",
                 "academic_fields": ["philosophy"],
                 "fields": {"title": "Canonical"},
             },
         )
-        response = self.client.post("/api/cli/sync")
+        response = self.client.post("/api/cli/sync", headers=self.admin_headers())
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["direction"], "database-to-bibtex")
         self.assertIn("db-first", db.BIB_PATH.read_text(encoding="utf-8"))

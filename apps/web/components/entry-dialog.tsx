@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { getCiteFormat, updateNotes, type Entry, type CiteFormat } from "@/lib/api"
+import { clearStoredSession, readStoredSession } from "@/lib/admin-session"
 import { SourceAssetsPanel } from "@/components/source-assets-panel"
 
 interface EntryDialogProps {
@@ -23,6 +24,7 @@ interface EntryDialogProps {
 export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
   const [notes, setNotes] = useState(() => entry?.notes || "")
   const [saving, setSaving] = useState(false)
+  const [notesError, setNotesError] = useState("")
   const [citeFormats, setCiteFormats] = useState<CiteFormat | null>(null)
   const [activeTab, setActiveTab] = useState("details")
 
@@ -43,11 +45,23 @@ export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
 
   const handleSaveNotes = async () => {
     if (!entry) return
+    const session = readStoredSession()
+    if (!session) {
+      setNotesError("Unlock with the management password in the Assets tab to save notes.")
+      return
+    }
     setSaving(true)
+    setNotesError("")
     try {
-      await updateNotes(entry.key, notes)
+      await updateNotes(entry.key, notes, session.token)
     } catch (error) {
-      console.error("Failed to save notes:", error)
+      if (error instanceof Error && error.message === "PRIVATE_SESSION_EXPIRED") {
+        clearStoredSession()
+        setNotesError("Session expired. Unlock again in the Assets tab.")
+      } else {
+        setNotesError("Failed to save notes.")
+        console.error("Failed to save notes:", error)
+      }
     } finally {
       setSaving(false)
     }
@@ -175,7 +189,8 @@ export function EntryDialog({ entry, onClose, onCopy }: EntryDialogProps) {
               placeholder="Add notes about this entry..."
               className="min-h-[200px] font-mono text-sm"
             />
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex items-center justify-end gap-3">
+              {notesError && <p className="text-sm text-red-600">{notesError}</p>}
               <Button onClick={handleSaveNotes} disabled={saving}>
                 <Save className="h-4 w-4" />
                 {saving ? "Saving..." : "Save Notes"}

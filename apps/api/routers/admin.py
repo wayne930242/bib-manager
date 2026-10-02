@@ -3,7 +3,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
+
 from models.source_asset import (
     AdminCredential,
     AdminSession,
@@ -13,6 +14,7 @@ from models.source_asset import (
     SourceAssetUpload,
     SourceAssetUploadRequest,
 )
+from routers.dependencies import require_admin_session
 from services import admin_session
 from services import database as db
 from services.source_asset_storage import (
@@ -23,17 +25,6 @@ from services.source_asset_storage import (
 )
 
 router = APIRouter(prefix="/admin", tags=["private source assets"])
-
-
-def require_admin_session(
-    authorization: Annotated[str | None, Header()] = None,
-) -> None:
-    scheme, _, token = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not admin_session.verify_session(token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Valid private asset session required",
-        )
 
 
 @router.post("/session", response_model=AdminSession)

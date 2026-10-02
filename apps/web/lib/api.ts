@@ -179,17 +179,20 @@ export async function getCiteFormat(key: string): Promise<CiteFormat> {
   return res.json()
 }
 
-export async function updateNotes(key: string, notes: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/entries/${encodeURIComponent(key)}/notes`, {
+export async function updateNotes(
+  key: string,
+  notes: string,
+  token: string
+): Promise<void> {
+  await privateRequest(`/api/entries/${encodeURIComponent(key)}/notes`, token, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ notes }),
   })
-  if (!res.ok) throw new Error("Failed to update notes")
 }
 
-export async function exportBibliography(): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/api/cli/export`, { method: "POST" })
-  if (!res.ok) throw new Error("Failed to export bibliography")
-  return res.json()
+export async function exportBibliography(
+  token: string
+): Promise<{ success: boolean }> {
+  return privateRequest("/api/cli/export", token, { method: "POST" })
 }

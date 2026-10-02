@@ -1,10 +1,13 @@
 """Explicit DB-first import/export operations for local workflows."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from routers.dependencies import require_admin_session
 from services import database as db
 
-router = APIRouter(prefix="/cli", tags=["cli"])
+router = APIRouter(
+    prefix="/cli", tags=["cli"], dependencies=[Depends(require_admin_session)]
+)
 
 
 @router.post("/export")

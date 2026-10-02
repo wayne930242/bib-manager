@@ -9,6 +9,7 @@ import { EntryTable } from "@/components/entry-table"
 import { EntryCard } from "@/components/entry-card"
 import { EntryDialog } from "@/components/entry-dialog"
 import { getEntries, searchEntries, exportBibliography, getCiteFormat, type Entry } from "@/lib/api"
+import { clearStoredSession, readStoredSession } from "@/lib/admin-session"
 
 function useDebounce<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -23,6 +24,7 @@ export default function Home() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState("")
   const [query, setQuery] = useState("")
   const [view, setView] = useState<"table" | "card">("table")
   const [selectedEntry, setSelectedEntry] = useState<Entry | null>(null)
@@ -54,11 +56,23 @@ export default function Home() {
   }, [loadEntries])
 
   const handleExport = async () => {
+    const session = readStoredSession()
+    if (!session) {
+      setExportError("Unlock with the management password in an entry's Assets tab first.")
+      return
+    }
     setExporting(true)
+    setExportError("")
     try {
-      await exportBibliography()
+      await exportBibliography(session.token)
     } catch (error) {
-      console.error("Export failed:", error)
+      if (error instanceof Error && error.message === "PRIVATE_SESSION_EXPIRED") {
+        clearStoredSession()
+        setExportError("Session expired. Unlock again in an entry's Assets tab.")
+      } else {
+        setExportError("Export failed.")
+        console.error("Export failed:", error)
+      }
     } finally {
       setExporting(false)
     }
@@ -91,15 +105,18 @@ export default function Home() {
               {total.toLocaleString()} entries
             </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            <Download className="h-4 w-4" />
-            {exporting ? "Exporting…" : "Export .bib"}
-          </Button>
+          <div className="flex items-center gap-3">
+            {exportError && <p className="text-sm text-red-600">{exportError}</p>}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Exporting…" : "Export .bib"}
+            </Button>
+          </div>
         </div>
       </header>
 
